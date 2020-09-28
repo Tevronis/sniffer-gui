@@ -1,0 +1,3 @@
+#!/home/mike/PycharmProjects/diploma/venv/bin/python
+from ldapdomaindump import pretty
+pretty.main()

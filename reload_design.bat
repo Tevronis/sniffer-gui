@@ -1,0 +1,1 @@
+pyuic5 ui\design.ui -o ui\design.py
