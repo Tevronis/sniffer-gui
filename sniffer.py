@@ -25,19 +25,24 @@ class Sniffer(SnifferBase):
         addrs = psutil.net_if_addrs()
         devices = addrs.keys()
 
-        print("Доступные устройства:")
-        for d in devices:
-            print(d)
+        assert self.context.interface in devices or self.context.interface is None
+
+        if self.context.interface is None:
+            self.dev = devices
+        else:
+            self.dev = self.context.interface
+        # self.dev = 'enp34s0'
+        # print("Доступные устройства:")
+        # for d in devices:
+        #     print(d)
         # import pdb; pdb.set_trace()
 
-
         # self.dev = input("Введите название устройства: ")
-        self.dev = 'enp34s0'
 
-        print("Сканируемое устройство: " + self.dev)
+        print("Сканируемое устройство: ", self.dev)
 
     def run(self):
-        cap = pyshark.LiveCapture(self.dev)# , include_raw=True)
+        cap = pyshark.LiveCapture(interface=self.dev)# , include_raw=True)
         # cap = pcapy.open_live(self.dev, 65536 * 8, self.context.PROMISCUOUS_MODE, 0)
         while True:
             cap.sniff(packet_count=5)
@@ -49,7 +54,7 @@ class Sniffer(SnifferBase):
             p = NetworkPacket(packet)
         except IncorrectPacket:
             return
-        return
+        # import pdb; pdb.set_trace()
         # Save all packets
         if self.context.RAW_MODE:
             self.raw_mode(p)

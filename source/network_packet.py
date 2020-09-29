@@ -1,7 +1,6 @@
 # coding=utf-8
 import logging
 
-from source.report import Report
 from utils import *
 
 LOGGER = logging.getLogger(__name__)
@@ -13,17 +12,18 @@ class IncorrectPacket(Exception):
 
 class NetworkPacket:
     def __init__(self, packet):
-        self.incorrect = False
-        try:
-            self.parse(packet)
-        except IncorrectPacket as e:
-            self.incorrect = True
-            return
+        self.packet = packet
+        self.hdr_len = 0
+        self.parse(packet)
         self.transport_protocol = packet.transport_layer
         # self.decode_data = None
-        transport = packet.__getattr__(packet.transport_layer.lower())
-        self.source_port = transport.srcport
-        self.dest_port = transport.dstport
+        self.transport = packet.__getattr__(packet.transport_layer.lower())
+
+        self.src_addr = packet.ip.src
+        self.src_port = packet[self.transport_protocol].srcport
+        self.dst_addr = packet.ip.dst
+        self.dst_port = packet[self.transport_protocol].dstport
+
         self.protocol_msg = None
         self.data = None
 
@@ -41,7 +41,11 @@ class NetworkPacket:
             src_port = pkt[pkt.transport_layer].srcport
             dst_addr = pkt.ip.dst
             dst_port = pkt[pkt.transport_layer].dstport
-            print('%s  %s:%s --> %s:%s' % (protocol, src_addr, src_port, dst_addr, dst_port))
+            if protocol == 'TCP':
+                self.hdr_len = pkt.tcp.hdr_len
+            if protocol == 'UDP':
+                self.hdr_len = pkt.upd.length
+            # print('%s  %s:%s --> %s:%s' % (protocol, src_addr, src_port, dst_addr, dst_port))
         except AttributeError as e:
             # ignore packets that aren't TCP/UDP or IPv4
             raise IncorrectPacket()
@@ -102,11 +106,6 @@ class NetworkPacket:
         # else:
         #     raise IncorrectPacket()
 
-    @property
-    def protocol_name(self):
-        d = {17: 'UDP', 6: 'TCP'}
-        return d.get(self.transport_protocol, '')
-
     ### PRINT FUNCTIONS ###
 
     def get_header(self):
@@ -116,14 +115,22 @@ class NetworkPacket:
         # Writer.log_packet(logfile, '{}\n{}'.format(ip_head, self.protocol_head))
 
     def get_light_header(self):
-        ip_head = 'Заголовок IP: Длинна IP заголовка : {} Протокол : {} Адресс отправения : {} Адресс доставки : {}'.format(
-            self.ihl, self.protocol_name, self.s_addr, self.d_addr)
-        protocol_head = ''
-        if self.protocol_name in ('TCP', 'UDP'):
-            protocol_head = 'Заголовок {}: Исходный порт : {} Порт назначения : {} Длина {} заголовка : {} Размер данных : {}\n'.format(
-                self.protocol_name, self.source_port, self.dest_port, self.protocol_name, self.h_length, self.data_len)
+        ip_head = None
+        if 'ip' in self.packet:
+            ip_head = 'Заголовок IP: Длинна IP заголовка : {} Протокол : {} Адресс отправения : {} Адресс доставки : {}'.format(
+                self.packet.ip.len, self.transport_protocol, self.src_addr, self.dst_addr)
 
-        return '{}\n{}'.format(ip_head, protocol_head)
+        protocol_head = None
+        if self.transport_protocol in ('TCP', 'UDP'):
+            # import pdb; pdb.set_trace()
+            protocol_head = 'Заголовок {}: Исходный порт : {} Порт назначения : {} Длина {} заголовка : {}\n'.format(
+                self.transport_protocol, self.src_port, self.dst_port, self.transport_protocol, self.hdr_len)
+        result = ''
+        if ip_head:
+            result += ip_head + '\n'
+        if protocol_head:
+            result += protocol_head
+        return result
 
     def print_full_header(self):
         pass
@@ -153,7 +160,7 @@ class NetworkPacket:
                     break
             else:
                 msg = 'Замечено подключение с ключевой фразой: {} с ' \
-                      'адресса {}'.format(' '.join(keyword), self.s_addr)
+                      'адресса {}'.format(' '.join(keyword), self.src_addr)
                 LOGGER.info(msg)
                 if LOGGER.root.handlers[0].__class__.__name__ == 'FileHandler':
                     print(str(msg))
@@ -162,14 +169,14 @@ class NetworkPacket:
 
     def port_detection(self, keyports):
         result = False
-        if self.dest_port in keyports:
-            msg = 'Замечено подключение на порт {} с адресса {}'.format(self.dest_port, self.s_addr)
+        if self.dst_port in keyports:
+            msg = 'Замечено подключение на порт {} с адресса {}'.format(self.dst_port, self.src_addr)
             LOGGER.info(msg)
             if LOGGER.root.handlers[0].__class__.__name__ == 'FileHandler':
                 print(str(msg))
             result = True
-        if self.source_port in keyports:
-            msg = 'Замечено подключение на порт {} с адресса {}'.format(self.source_port, self.d_addr)
+        if self.src_port in keyports:
+            msg = 'Замечено подключение на порт {} с адресса {}'.format(self.src_port, self.dst_addr)
             LOGGER.info(msg)
             if LOGGER.root.handlers[0].__class__.__name__ == 'FileHandler':
                 print(str(msg))

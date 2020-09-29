@@ -19,14 +19,12 @@ class Context:
     apps_packets_cnt = {'RDP': 49, 'TeamViewer': 49, 'Radmin': 29, 'Telnet': 3}
     analyze = {"ip": {}}
     outfile = None
+    interface = None
 
     def __init__(self, argv):
-        if '-i' in argv:
-            # TODO интерактивный ввод параметров
-            pass
         # recommendation config: -p -n -s -o test.txt
         try:
-            cmd_opts = "pfnago:ds"
+            cmd_opts = "pfnago:di:s"
             opts, args = getopt.getopt(argv[1:], cmd_opts)
             for opt in opts:
                 if opt[0] == '-p':
@@ -45,8 +43,10 @@ class Context:
                     self.SMART_HEADER_PRINT = True
                 if opt[0] == '-o':
                     self.outfile = opt[1]
+                if opt[0] == '-i':
+                    self.interface = opt[1]
         except getopt.GetoptError:
-            print('''Invalid parameters [pfnago:ds]
+            print('''Invalid parameters [pfnago:di:s]
         p - перехват всех пакетов
         f - перехват пакетов только удаленного доступа 
         n - неразборчивый режим
@@ -54,6 +54,7 @@ class Context:
         g - print data i analise mode
         o - сохранять в файл
         d - печать данные пакета
+        i - название интерефейса (any - любой)
         s - печать сокращенную информацию о пакете''')
         root = logging.getLogger()
         del root.handlers[:]

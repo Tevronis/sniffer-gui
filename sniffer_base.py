@@ -55,14 +55,14 @@ class SnifferBase:
         if self.context.DATA_PRINT:
             packet.print_data()
 
-    def update_stream(self, p):
-        if p.protocol_name in ('TCP', 'UDP'):
-            src = '{}:{}'.format(p.s_addr, p.source_port)
-            dst = '{}:{}'.format(p.d_addr, p.dest_port)
-            if p.protocol_name == 'TCP':
-                self.tcp_streams[tuple(sorted([src, dst]))].append(p)
-            if p.protocol_name == 'UDP':
-                self.udp_streams[tuple(sorted([src, dst]))].append(p)
+    def update_stream(self, pkt):
+        if pkt.transport_protocol in ('TCP', 'UDP'):
+            src = '{}:{}'.format(pkt.src_addr, pkt.src_port)
+            dst = '{}:{}'.format(pkt.dst_addr, pkt.dst_port)
+            if pkt.protocol_name == 'TCP':
+                self.tcp_streams[tuple(sorted([src, dst]))].append(pkt)
+            if pkt.protocol_name == 'UDP':
+                self.udp_streams[tuple(sorted([src, dst]))].append(pkt)
 
     def print_port_analyze(self, port, packets, ip):
         if packets is None:
@@ -89,24 +89,24 @@ class SnifferBase:
                     'server': None,
                     'client': None
                 }
-                host1 = stream[0].s_addr
-                host2 = stream[0].d_addr
-                result['src_port'] = stream[0].source_port
-                result['dst_port'] = stream[0].dest_port
+                host1 = stream[0].src_addr
+                host2 = stream[0].dst_addr
+                result['src_port'] = stream[0].src_port
+                result['dst_port'] = stream[0].dst_port
                 packet_length_stat = {
                     host1: collections.defaultdict(int),
                     host2: collections.defaultdict(int)
                 }
                 delay_between_packets = collections.defaultdict(int)
                 smb_counter = 0
-                for idx in xrange(1, len(stream)):
+                for idx in range(1, len(stream)):
                     packet = stream[idx]
                     previous_packet = stream[idx - 1]
                     if 'SMB' in packet.data:
                         smb_counter += 1
 
                     delay_between_packets[discretion(packet.time - previous_packet.time, 1)] += 1
-                    packet_length_stat[packet.s_addr][discretion(packet.data_len, 60)] += 1
+                    packet_length_stat[packet.src_addr][discretion(packet.data_len, 60)] += 1
 
                 result['delay_between_packets'] = delay_between_packets
                 if smb_counter != 0:
