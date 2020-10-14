@@ -1,1 +1,1 @@
-pyuic5 ui\design.ui -o ui\design.py
+pyuic5 ui/design.ui -o ui/design.py

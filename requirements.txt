@@ -1,6 +1,7 @@
 # need install libpcap0.8-dev or later
 # sudo apt install ...
 
+setuptools==39.0.1
 Flask==1.1.2
 Jinja2==2.11.2
 MarkupSafe==1.1.1
@@ -37,8 +38,8 @@ pyqt5-tools==5.15.1.1.7.3
 pyshark==0.4.2.11
 python-dateutil==2.8.1
 python-dotenv==0.14.0
-setuptools==39.0.1
 six==1.15.0
+shutils
 
 
 # sudo apt-get install python3.6-dev

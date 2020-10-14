@@ -26,14 +26,11 @@ class SnifferBase:
 
     def raw_mode(self, packet):
         header = packet.get_header()
-        LOGGER.info(header)
-        if LOGGER.root.handlers[0].__class__.__name__ == 'FileHandler':
-            print(str(header))
+        import pdb; pdb.set_trace()
+        print(str(header))
         if self.context.DATA_PRINT:
             packet.print_data()
-        LOGGER.info('\n* * * * * * * * * * * * * * * * *')
-        if LOGGER.root.handlers[0].__class__.__name__ == 'FileHandler':
-            print(str('\n* * * * * * * * * * * * * * * * *'))
+        print(str('\n* * * * * * * * * * * * * * * * *'))
 
     def filter_mode(self, packet):
         result = False

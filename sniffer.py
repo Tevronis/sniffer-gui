@@ -1,4 +1,6 @@
 # coding=utf-8
+import asyncio
+import os
 
 import pyshark
 import sys
@@ -11,9 +13,13 @@ from source.utils import *
 
 
 class Sniffer(SnifferBase):
-    def __init__(self, argv):
+    def __init__(self, argv, packet_callback=None, loop=None, output_pcap='last_capture.pcap'):
         SnifferBase.__init__(self)
         self.context = Context(argv=argv)
+        self.packet_callback = packet_callback
+        self.loop = loop
+        self.running = True
+        self.pcap_filename = output_pcap
 
     def setup(self):
         if self.outfile:
@@ -42,31 +48,44 @@ class Sniffer(SnifferBase):
         print("Сканируемое устройство: ", self.dev)
 
     def run(self):
-        cap = pyshark.LiveCapture(interface=self.dev)# , include_raw=True)
-        # cap = pcapy.open_live(self.dev, 65536 * 8, self.context.PROMISCUOUS_MODE, 0)
-        while True:
-            cap.sniff(packet_count=5)
-            for pkt in cap:
-                self.parse_packet(pkt)
+        print('Sniffer started working')
+        cap = pyshark.LiveCapture(interface=self.dev, eventloop=self.loop, output_file='temp.pcap')# , include_raw=True)
+        for pkt in cap.sniff_continuously():
+            if not self.running:
+                break
+            self.parse_packet(pkt)
 
-    def parse_packet(self, packet):
+        cap.close()
+        os.rename('temp.pcap', self.pcap_filename)
+        print('Sniffer stopped working, filename: %s' % self.pcap_filename)
+
+    def open_pcap(self):
+        capture = pyshark.FileCapture(self.pcap_filename)
+        for packet in capture:
+            self.parse_packet(packet)
+
+    def parse_packet(self, captured_data):
         try:
-            p = NetworkPacket(packet)
+            packet = NetworkPacket(captured_data)
         except IncorrectPacket:
+            # print('Unsupported packet type TODO')
             return
-        # import pdb; pdb.set_trace()
+
+        if self.packet_callback:
+            self.packet_callback(packet)
+
         # Save all packets
         if self.context.RAW_MODE:
-            self.raw_mode(p)
+            self.raw_mode(packet)
 
         # Save packet with remote protocol markers
-        if self.context.REMOTE_CAPTURE_MODE:
-            self.filter_mode(p)
+        # if self.context.REMOTE_CAPTURE_MODE:
+        #    self.filter_mode(packet)
 
         # Analyze packets stream
-        if self.context.ANALYZE_MODE:
-            self.update_stream(p)
-            self.analyze_mode(p)
+        #if self.context.ANALYZE_MODE:
+        ##    self.update_stream(packet)
+        #    self.analyze_mode(packet)
 
 
 if __name__ == "__main__":
