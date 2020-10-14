@@ -72,8 +72,8 @@ Vagrant.configure("2") do |config|
   #  ppa-purge ppa:gnome3-team/gnome3
     sudo add-apt-repository ppa:gnome3-team/gnome3 -y
     sudo apt-get update -y && sudo apt-get install gnome-shell ubuntu-gnome-desktop -y
-    cd /vagrant
-    ./install_dependencies.sh
+    # cd /vagrant
+    # ./install_dependencies.sh
     shutdown -h now
     # reboot
     # apt-get update
