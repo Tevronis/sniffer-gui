@@ -1,143 +1,53 @@
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
-from PyQt5.QtCore import *
-
+import sys
 import time
-import traceback, sys
+
+import numpy as np
+
+from matplotlib.backends.qt_compat import QtCore, QtWidgets, is_pyqt5
+if is_pyqt5():
+    from matplotlib.backends.backend_qt5agg import (
+        FigureCanvas, NavigationToolbar2QT as NavigationToolbar)
+else:
+    from matplotlib.backends.backend_qt4agg import (
+        FigureCanvas, NavigationToolbar2QT as NavigationToolbar)
+from matplotlib.figure import Figure
 
 
-class WorkerSignals(QObject):
-    '''
-    Defines the signals available from a running worker thread.
+class ApplicationWindow(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self._main = QtWidgets.QWidget()
+        self.setCentralWidget(self._main)
+        layout = QtWidgets.QVBoxLayout(self._main)
 
-    Supported signals are:
+        static_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+        layout.addWidget(static_canvas)
+        self.addToolBar(NavigationToolbar(static_canvas, self))
 
-    finished
-        No data
+        dynamic_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+        layout.addWidget(dynamic_canvas)
+        self.addToolBar(QtCore.Qt.BottomToolBarArea,
+                        NavigationToolbar(dynamic_canvas, self))
 
-    error
-        `tuple` (exctype, value, traceback.format_exc() )
+        self._static_ax = static_canvas.figure.subplots()
+        t = np.linspace(0, 10, 501)
+        self._static_ax.plot(t, np.tan(t), ".")
 
-    result
-        `object` data returned from processing, anything
+        self._dynamic_ax = dynamic_canvas.figure.subplots()
+        self._timer = dynamic_canvas.new_timer(
+            100, [(self._update_canvas, (), {})])
+        self._timer.start()
 
-    progress
-        `int` indicating % progress
-
-    '''
-    finished = pyqtSignal()
-    error = pyqtSignal(tuple)
-    result = pyqtSignal(object)
-    progress = pyqtSignal(int)
-
-
-class Worker(QRunnable):
-    '''
-    Worker thread
-
-    Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
-
-    :param callback: The function callback to run on this worker thread. Supplied args and
-                     kwargs will be passed through to the runner.
-    :type callback: function
-    :param args: Arguments to pass to the callback function
-    :param kwargs: Keywords to pass to the callback function
-
-    '''
-
-    def __init__(self, fn, *args, **kwargs):
-        super(Worker, self).__init__()
-
-        # Store constructor arguments (re-used for processing)
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
-        self.signals = WorkerSignals()
-
-        # Add the callback to our kwargs
-        self.kwargs['progress_callback'] = self.signals.progress
-
-    @pyqtSlot()
-    def run(self):
-        '''
-        Initialise the runner function with passed args, kwargs.
-        '''
-
-        # Retrieve args/kwargs here; and fire processing using them
-        try:
-            result = self.fn(*self.args, **self.kwargs)
-        except:
-            traceback.print_exc()
-            exctype, value = sys.exc_info()[:2]
-            self.signals.error.emit((exctype, value, traceback.format_exc()))
-        else:
-            self.signals.result.emit(result)  # Return the result of the processing
-        finally:
-            self.signals.finished.emit()  # Done
+    def _update_canvas(self):
+        self._dynamic_ax.clear()
+        t = np.linspace(0, 10, 101)
+        # Shift the sinusoid as a function of time.
+        self._dynamic_ax.plot(t, np.sin(t + time.time()))
+        self._dynamic_ax.figure.canvas.draw()
 
 
-class MainWindow(QMainWindow):
-
-    def __init__(self, *args, **kwargs):
-        super(MainWindow, self).__init__(*args, **kwargs)
-
-        self.counter = 0
-
-        layout = QVBoxLayout()
-
-        self.l = QLabel("Start")
-        b = QPushButton("DANGER!")
-        b.pressed.connect(self.oh_no)
-
-        layout.addWidget(self.l)
-        layout.addWidget(b)
-
-        w = QWidget()
-        w.setLayout(layout)
-
-        self.setCentralWidget(w)
-
-        self.show()
-
-        self.threadpool = QThreadPool()
-        print("Multithreading with maximum %d threads" % self.threadpool.maxThreadCount())
-
-        self.timer = QTimer()
-        self.timer.setInterval(1000)
-        self.timer.timeout.connect(self.recurring_timer)
-        self.timer.start()
-
-    def progress_fn(self, n):
-        print("%d%% done" % n)
-
-    def execute_this_fn(self, progress_callback):
-        for n in range(0, 5):
-            time.sleep(1)
-            progress_callback.emit(n * 100 / 4)
-
-        return "Done."
-
-    def print_output(self, s):
-        print(s)
-
-    def thread_complete(self):
-        print("THREAD COMPLETE!")
-
-    def oh_no(self):
-        # Pass the function to execute
-        worker = Worker(self.execute_this_fn)  # Any other args, kwargs are passed to the run function
-        worker.signals.result.connect(self.print_output)
-        worker.signals.finished.connect(self.thread_complete)
-        worker.signals.progress.connect(self.progress_fn)
-
-        # Execute
-        self.threadpool.start(worker)
-
-    def recurring_timer(self):
-        self.counter += 1
-        self.l.setText("Counter: %d" % self.counter)
-
-
-app = QApplication([])
-window = MainWindow()
-app.exec_()
+if __name__ == "__main__":
+    qapp = QtWidgets.QApplication(sys.argv)
+    app = ApplicationWindow()
+    app.show()
+    qapp.exec_()

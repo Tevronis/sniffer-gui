@@ -2,12 +2,14 @@ import asyncio
 import logging
 import random
 import signal
+from collections import defaultdict
 from functools import partial
-from time import sleep
+from time import sleep, time
 
 import matplotlib.pyplot as plt
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 from sniffer import Sniffer
 from ui import main_design
@@ -90,17 +92,22 @@ class Worker(QRunnable):
 
 
 class SnifferSession:
+    SECOND = 2
     sniffer = None
 
     def __init__(self, args, loop=None, packet_callback=None, **kwargs):
         self.sniffer = Sniffer(argv=args, packet_callback=packet_callback, loop=loop, **kwargs)
         self.packets_count = 0
         self.packets = []
+        self.packets_by_time = defaultdict(list)
+        self.start_time = None
+        self.last_time = None
 
     def set_callback(self, callback):
         self.sniffer.packet_callback = callback
 
     def start_sniffer(self):
+        self.start_time = time()
         self.sniffer.run()
 
     def stop_sniffer(self):
@@ -118,14 +125,32 @@ class SnifferSession:
     def add_packet(self, packet):
         self.packets.append({
             'packet': packet,
+            'time': time() - self.start_time,
             'packet_capacity': packet.packet.length
         })
         self.packets_count += 1
+        self.last_time = self.packets[-1]['time'] / self.SECOND
+        self.packets_by_time[round(self.last_time, 1)].append(self.packets[-1])
 
     def get_capacities(self, first=None, second=None):
         first = first or 0
         second = second or self.packets_count
-        return [int(packet['packet_capacity']) for packet in self.packets][first:second]
+        return {
+            idx: int(packet['packet_capacity'])
+            for idx, packet in enumerate(self.packets)
+            if first <= idx <= second
+        }
+
+    def get_packets_by_descret_times(self, start, end, callback=lambda x: x):
+        result = defaultdict(list)
+        for t, packets in self.packets_by_time.items():
+            print('t:', t)
+            if t < start:
+                continue
+            if end < t:
+                break
+            result[t].append(callback(packets))
+        return result
 
     def save(self):
         pass
@@ -154,6 +179,135 @@ def get_operation_by_name(operations, name):
     return None
 
 
+class Tab:
+    def __init__(self, tab_widget, tab=None, label='tab', ox=None, oy=None):
+        self.label = label
+        self.ox = ox
+        self.oy = oy
+
+        if not tab:
+            tab = QtWidgets.QWidget()
+            tab_widget.addTab(tab, "")
+
+        tab_widget.setTabText(tab_widget.indexOf(tab), label)
+        tab.setObjectName(label)
+
+        grid = QGridLayout()
+
+        # self.figure, self.plt = plt.subplots()
+        # self.figure = plt.figure()
+        # self.plt = self.figure.add_subplot(111)
+
+        tab.setLayout(grid)
+        self.canvas = FigureCanvas(Figure())
+        self.plt = self.canvas.figure.subplots()
+        grid.addWidget(self.canvas)
+
+        self.tab_slider = QScrollBar(Qt.Horizontal)
+        grid.addWidget(self.tab_slider)
+
+    def assign_scroll_trigger(self, callback):
+        self.tab_slider.actionTriggered.connect(callback)
+
+    def update_slider(self, session, const):
+        raise NotImplementedError()
+
+    def draw(self, session):
+        raise NotImplementedError()
+
+
+class Tab1(Tab):
+    RANGE_CONST = 30
+    start = None
+    end = None
+
+    def is_changes_required(self):
+        old_first = self.start
+        old_second = self.end
+        pos = self.tab_slider.sliderPosition()
+        self.start = max(0, pos - self.RANGE_CONST)
+        self.end = pos
+        # If changed - True else False
+        return not(old_first == self.start and old_second == self.end)
+
+    def draw(self, session):
+
+        data = session.get_capacities(self.start, self.end)
+        x, y = zip(*data.items())
+        self.plt.plot(x, y)
+        # plt.plot(x, y)
+        # print(dir(self.plt))
+        self.plt.set_ylabel(self.oy)
+        self.plt.set_xlabel(self.ox)
+
+    def update_slider(self, session, const):
+        self.tab_slider.setMinimum(0)
+        self.tab_slider.setMaximum(session.packets_count)
+
+
+class Tab2(Tab):
+    RANGE_CONST = 5
+    start = None
+    end = None
+
+    def is_changes_required(self):
+        old_first = self.start
+        old_second = self.end
+        pos = self.tab_slider.sliderPosition()
+        self.start = max(0, pos - self.RANGE_CONST)
+        self.end = pos
+        # If changed - True else False
+        return not (old_first == self.start and old_second == self.end)
+
+    def draw(self, session):
+        data = session.get_packets_by_descret_times(self.start, self.end, callback=lambda x: len(x))
+        # print(data.items())
+        x = data.keys()
+        y = [item[0] for item in data.values()]
+        self.plt.plot(x, y)
+        self.plt.set_ylim(top=max(10, max(y+[0])))
+        # plt.plot(x, y)
+        # print(dir(self.plt))
+        self.plt.set_ylabel(self.oy)
+        self.plt.set_xlabel(self.ox)
+
+    def update_slider(self, session, const):
+        self.tab_slider.setMinimum(0)
+        self.tab_slider.setMaximum(session.last_time)
+
+
+class Tab3(Tab):
+    RANGE_CONST = 15
+    start = None
+    end = None
+
+    def is_changes_required(self):
+        old_first = self.start
+        old_second = self.end
+        pos = self.tab_slider.sliderPosition()
+        self.start = max(0, pos - self.RANGE_CONST)
+        self.end = pos
+        # If changed - True else False
+        return not (old_first == self.start and old_second == self.end)
+
+    def draw(self, session):
+        data = session.get_packets_by_descret_times(self.start, self.end,
+                                                    lambda x: sum([int(item['packet_capacity']) for item in x]))
+        # print(data.items())
+        x = data.keys()
+        y = [item[0] for item in data.values()]
+        self.plt.plot(x, y)
+        self.plt.set_ylim(top=max(4000, max(y+[0])))
+        # plt.plot(x, y)
+        # print(dir(self.plt))
+        self.plt.set_ylabel(self.oy)
+        self.plt.set_xlabel(self.ox)
+
+    def update_slider(self, session, const):
+        self.tab_slider.setMinimum(0)
+        self.tab_slider.setMaximum(session.last_time)
+
+
 class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
     LOGDIR = 'logs'
 
@@ -163,17 +317,17 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
         # Variables
         self.sniffer_session = None
 
-        # tab 1
-        grid = QGridLayout()
-        self.figure = plt.figure()
-        self.canvas = FigureCanvas(self.figure)
-        self.tab1.setLayout(grid)
-        grid.addWidget(self.canvas)
-        self.tab1_slider = QScrollBar(Qt.Horizontal)
-        self.tab1_slider.actionTriggered.connect(self.change_scroll_handler)
-        grid.addWidget(self.tab1_slider)
+        # tabs
+        self.tabWidget.currentChanged.connect(self.tab_changed)
+        self.tabs = [
+            Tab1(self.tabWidget, tab=self.tab1, label='График', ox='Номер пакета', oy='Объем пакета'),
+            Tab2(self.tabWidget, tab=self.tab2, label='Еще график', ox='Время', oy='Количество пакетов'),
+            Tab3(self.tabWidget, label='И еще график', ox='Время', oy='Объем пакетов')
+        ]
+        self.tabs[0].assign_scroll_trigger(self.change_scroll_handler)
+        self.tabs[1].assign_scroll_trigger(self.change_scroll_handler)
+        self.current_tab = self.tabs[0]
 
-        self.RANGE_CONST = 40
         self.first_packet = 0
         self.last_packet = 0
         self.packets_count = 0
@@ -232,9 +386,13 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
         # self.pcapModeButton.toggled.connect(self.enable_run_button)
         # self.executeBtn.clicked.connect(self.handler_execute_from_listbox)
 
+    def tab_changed(self, idx):
+        self.current_tab = self.tabs[idx]
+        print('Selected', self.current_tab.label)
+
     def change_scroll_handler(self):
         self.update_graph(self.sniffer_session)
-        print(self.tab1_slider.sliderPosition())
+        print(self.current_tab.tab_slider.sliderPosition())
 
     def handler_execute_from_listbox(self):
         operations = []
@@ -249,36 +407,36 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
         o.execute()
 
     def clear_session(self):
-        self.figure.clf()
-        plt.plot([])
-        plt.ylabel('Объем пакета')
-        plt.xlabel('Номер пакета')
-        self.canvas.draw_idle()
+        self.current_tab.plt.cla()
+        # self.current_tab.plt.plot([])
+        self.current_tab.plt.set_ylabel(self.current_tab.oy)
+        self.current_tab.plt.set_xlabel(self.current_tab.ox)
+        self.current_tab.canvas.draw_idle()
 
-    def change_range(self, session):
-        if session.packets_count < self.RANGE_CONST:
-            self.first_packet = 0
-            self.last_packet = session.packets_count
-        else:
-            pos = self.tab1_slider.sliderPosition()
-            self.first_packet = max(0, pos - self.RANGE_CONST)
-            self.last_packet = pos
+    def update_all_sliders(self, session):
+        for tab in self.tabs:
+            tab.tab_slider.setMinimum(self.current_tab.RANGE_CONST)
+            tab.tab_slider.setMaximum(session.packets_count)
+            # tab.tab_slider.setValue(self.current_tab.tab_slider.value())
 
     def update_graph(self, session):
         self.packetsCountLabelEdit.setText(str(session.packets_count))
-        self.tab1_slider.setMinimum(self.RANGE_CONST)
-        self.tab1_slider.setMaximum(session.packets_count)
-        self.figure.clf()
+        # self.update_all_sliders(session)
+        self.current_tab.update_slider(session, self.current_tab.RANGE_CONST)
+        # self.current_tab.tab_slider.setMinimum(self.RANGE_CONST)
+        # self.current_tab.tab_slider.setMaximum(session.packets_count)
 
         assert (self.first_packet <= self.last_packet <= self.packets_count,
                 'first_packet: %s, last_packet %s, packet_count: %s' % (
                     self.first_packet, self.last_packet, self.packets_count))
 
-        self.change_range(session)
-        plt.plot(session.get_capacities(self.first_packet, self.last_packet))
-        plt.ylabel('Объем пакета')
-        plt.xlabel('Номер пакета')
-        self.canvas.draw_idle()
+        if self.current_tab.is_changes_required():
+            # self.current_tab.canvas.figure.clf(keep_observers=True)
+            self.current_tab.plt.cla()
+            # print(dir(self.figure))
+            self.current_tab.draw(session)
+            # self.canvas.draw_idle()
+            self.current_tab.canvas.draw_idle()
 
     def get_filename(self):
         return self.fileEdit.text()
