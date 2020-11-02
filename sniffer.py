@@ -37,13 +37,17 @@ class Sniffer(SnifferBase):
             self.dev = devices
         else:
             self.dev = self.context.interface
+
         # self.dev = 'enp34s0'
         # print("Доступные устройства:")
+        # print(self.dev)
         # for d in devices:
-        #     print(d)
+        #    print(d)
         # import pdb; pdb.set_trace()
 
         # self.dev = input("Введите название устройства: ")
+        if not isinstance(self.dev, str):
+            self.dev = list(self.dev)
 
         print("Сканируемое устройство: ", self.dev)
 
@@ -61,14 +65,19 @@ class Sniffer(SnifferBase):
 
     def open_pcap(self):
         capture = pyshark.FileCapture(self.pcap_filename)
+        # capture.set_debug()
+        capture.load_packets()
+        packets = []
         for packet in capture:
+            packets.append(packet)
+        for packet in packets:
             self.parse_packet(packet)
 
     def parse_packet(self, captured_data):
         try:
             packet = NetworkPacket(captured_data)
         except IncorrectPacket:
-            # print('Unsupported packet type TODO')
+            print('Unsupported packet type TODO')
             return
 
         if self.packet_callback:

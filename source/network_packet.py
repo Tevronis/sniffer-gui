@@ -37,7 +37,14 @@ class NetworkPacket:
 
         try:
             protocol = pkt.transport_layer
+            #print(protocol)
+            # print(dir(pkt))
+            # if not hasattr(pkt, 'ipv6'):
+            #    print(pkt.show())
+            #    print(pkt.interface_captured)
+
             src_addr = pkt.ip.src
+            #print(src_addr)
             src_port = pkt[pkt.transport_layer].srcport
             dst_addr = pkt.ip.dst
             dst_port = pkt[pkt.transport_layer].dstport

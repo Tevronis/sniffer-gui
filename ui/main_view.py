@@ -5,6 +5,7 @@ import signal
 from collections import defaultdict
 from functools import partial
 from time import sleep, time
+from datetime import datetime, timedelta
 
 import matplotlib.pyplot as plt
 from PyQt5 import QtWidgets, QtCore
@@ -12,87 +13,20 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 from sniffer import Sniffer
+from source.multithreading_helpers import Worker
+from source.widgets.record import Record
+from source.widgets.tab import Tab1, Tab2, Tab3
 from ui import main_design
 
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 
-import traceback, sys
-
-
-class WorkerSignals(QObject):
-    """
-    Defines the signals available from a running worker thread.
-
-    Supported signals are:
-
-    finished
-        No data
-
-    error
-        `tuple` (exctype, value, traceback.format_exc() )
-
-    result
-        `object` data returned from processing, anything
-
-    progress
-        `int` indicating % progress
-
-    """
-    finished = pyqtSignal()
-    error = pyqtSignal(tuple)
-    result = pyqtSignal(object)
-    progress = pyqtSignal(int)
-
-
-class Worker(QRunnable):
-    """
-    Worker thread
-
-    Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
-
-    :param callback: The function callback to run on this worker thread. Supplied args and
-                     kwargs will be passed through to the runner.
-    :type callback: function
-    :param args: Arguments to pass to the callback function
-    :param kwargs: Keywords to pass to the callback function
-
-    """
-
-    def __init__(self, fn, *args, **kwargs):
-        super(Worker, self).__init__()
-
-        # Store constructor arguments (re-used for processing)
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
-        self.signals = WorkerSignals()
-
-        # Add the callback to our kwargs
-        self.kwargs['progress_callback'] = self.signals.progress
-
-    @pyqtSlot()
-    def run(self):
-        """
-        Initialise the runner function with passed args, kwargs.
-        """
-
-        # Retrieve args/kwargs here; and fire processing using them
-        try:
-            result = self.fn(*self.args, **self.kwargs)
-        except:
-            traceback.print_exc()
-            exctype, value = sys.exc_info()[:2]
-            self.signals.error.emit((exctype, value, traceback.format_exc()))
-        else:
-            self.signals.result.emit(result)  # Return the result of the processing
-        finally:
-            self.signals.finished.emit()  # Done
+import sys
 
 
 class SnifferSession:
-    SECOND = 2
+    DELAY = 1
     sniffer = None
 
     def __init__(self, args, loop=None, packet_callback=None, **kwargs):
@@ -107,7 +41,6 @@ class SnifferSession:
         self.sniffer.packet_callback = callback
 
     def start_sniffer(self):
-        self.start_time = time()
         self.sniffer.run()
 
     def stop_sniffer(self):
@@ -122,15 +55,42 @@ class SnifferSession:
     def set_pcap_filename(self, filename):
         self.sniffer.pcap_filename = filename
 
+    @staticmethod
+    def _round_time(dt, round_to=60):
+        """Round a datetime object to any time lapse in seconds
+        dt : datetime.datetime object, default now.
+        roundTo : Closest number of seconds to round to, default 1 minute.
+        """
+        seconds = (dt.replace(tzinfo=None) - dt.min).seconds
+        rounding = (seconds + round_to / 2) // round_to * round_to
+        return dt + timedelta(0, rounding - seconds, -dt.microsecond)
+
+    def get_interval_position(self, start, end):
+        # import pdb; pdb.set_trace()
+        # print('get_interval_position', ((end - start) / self.DELAY).seconds)
+        return ((end - start) / self.DELAY).seconds
+
+    def get_last_interval(self):
+        return self.get_interval_position(self.start_time, self.last_time)
+
     def add_packet(self, packet):
+        # packet.packet.frame_info
+        # .time_relative - no need to be converted
+        # .time_epoch - need to be converted
+        t = datetime.fromtimestamp(int(packet.packet.frame_info.time_epoch.split('.')[0]))
+        t = self._round_time(t, self.DELAY)
+        # print('t:', t)
+        if self.start_time is None:
+            self.start_time = t
+        # import pdb; pdb.set_trace()
         self.packets.append({
             'packet': packet,
-            'time': time() - self.start_time,
+            'time': t,
             'packet_capacity': packet.packet.length
         })
         self.packets_count += 1
-        self.last_time = self.packets[-1]['time'] / self.SECOND
-        self.packets_by_time[round(self.last_time, 1)].append(self.packets[-1])
+        self.last_time = t
+        self.packets_by_time[self.get_last_interval()].append(self.packets[-1])
 
     def get_capacities(self, first=None, second=None):
         first = first or 0
@@ -143,8 +103,12 @@ class SnifferSession:
 
     def get_packets_by_descret_times(self, start, end, callback=lambda x: x):
         result = defaultdict(list)
+        # import pdb; pdb.set_trace()
+        # print(self.packets_by_time)
         for t, packets in self.packets_by_time.items():
-            print('t:', t)
+           #  print('t:', t)
+            # t = self.get_interval_position(t, self.start_time)
+            # import pdb; pdb.set_trace()
             if t < start:
                 continue
             if end < t:
@@ -179,135 +143,6 @@ def get_operation_by_name(operations, name):
     return None
 
 
-class Tab:
-    def __init__(self, tab_widget, tab=None, label='tab', ox=None, oy=None):
-        self.label = label
-        self.ox = ox
-        self.oy = oy
-
-        if not tab:
-            tab = QtWidgets.QWidget()
-            tab_widget.addTab(tab, "")
-
-        tab_widget.setTabText(tab_widget.indexOf(tab), label)
-        tab.setObjectName(label)
-
-        grid = QGridLayout()
-
-        # self.figure, self.plt = plt.subplots()
-        # self.figure = plt.figure()
-        # self.plt = self.figure.add_subplot(111)
-
-        tab.setLayout(grid)
-        self.canvas = FigureCanvas(Figure())
-        self.plt = self.canvas.figure.subplots()
-        grid.addWidget(self.canvas)
-
-        self.tab_slider = QScrollBar(Qt.Horizontal)
-        grid.addWidget(self.tab_slider)
-
-    def assign_scroll_trigger(self, callback):
-        self.tab_slider.actionTriggered.connect(callback)
-
-    def update_slider(self, session, const):
-        raise NotImplementedError()
-
-    def draw(self, session):
-        raise NotImplementedError()
-
-
-class Tab1(Tab):
-    RANGE_CONST = 30
-    start = None
-    end = None
-
-    def is_changes_required(self):
-        old_first = self.start
-        old_second = self.end
-        pos = self.tab_slider.sliderPosition()
-        self.start = max(0, pos - self.RANGE_CONST)
-        self.end = pos
-        # If changed - True else False
-        return not(old_first == self.start and old_second == self.end)
-
-    def draw(self, session):
-
-        data = session.get_capacities(self.start, self.end)
-        x, y = zip(*data.items())
-        self.plt.plot(x, y)
-        # plt.plot(x, y)
-        # print(dir(self.plt))
-        self.plt.set_ylabel(self.oy)
-        self.plt.set_xlabel(self.ox)
-
-    def update_slider(self, session, const):
-        self.tab_slider.setMinimum(0)
-        self.tab_slider.setMaximum(session.packets_count)
-
-
-class Tab2(Tab):
-    RANGE_CONST = 5
-    start = None
-    end = None
-
-    def is_changes_required(self):
-        old_first = self.start
-        old_second = self.end
-        pos = self.tab_slider.sliderPosition()
-        self.start = max(0, pos - self.RANGE_CONST)
-        self.end = pos
-        # If changed - True else False
-        return not (old_first == self.start and old_second == self.end)
-
-    def draw(self, session):
-        data = session.get_packets_by_descret_times(self.start, self.end, callback=lambda x: len(x))
-        # print(data.items())
-        x = data.keys()
-        y = [item[0] for item in data.values()]
-        self.plt.plot(x, y)
-        self.plt.set_ylim(top=max(10, max(y+[0])))
-        # plt.plot(x, y)
-        # print(dir(self.plt))
-        self.plt.set_ylabel(self.oy)
-        self.plt.set_xlabel(self.ox)
-
-    def update_slider(self, session, const):
-        self.tab_slider.setMinimum(0)
-        self.tab_slider.setMaximum(session.last_time)
-
-
-class Tab3(Tab):
-    RANGE_CONST = 15
-    start = None
-    end = None
-
-    def is_changes_required(self):
-        old_first = self.start
-        old_second = self.end
-        pos = self.tab_slider.sliderPosition()
-        self.start = max(0, pos - self.RANGE_CONST)
-        self.end = pos
-        # If changed - True else False
-        return not (old_first == self.start and old_second == self.end)
-
-    def draw(self, session):
-        data = session.get_packets_by_descret_times(self.start, self.end,
-                                                    lambda x: sum([int(item['packet_capacity']) for item in x]))
-        # print(data.items())
-        x = data.keys()
-        y = [item[0] for item in data.values()]
-        self.plt.plot(x, y)
-        self.plt.set_ylim(top=max(4000, max(y+[0])))
-        # plt.plot(x, y)
-        # print(dir(self.plt))
-        self.plt.set_ylabel(self.oy)
-        self.plt.set_xlabel(self.ox)
-
-    def update_slider(self, session, const):
-        self.tab_slider.setMinimum(0)
-        self.tab_slider.setMaximum(session.last_time)
-
-
 class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
     LOGDIR = 'logs'
 
@@ -320,12 +155,13 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
         # tabs
         self.tabWidget.currentChanged.connect(self.tab_changed)
         self.tabs = [
-            Tab1(self.tabWidget, tab=self.tab1, label='График', ox='Номер пакета', oy='Объем пакета'),
-            Tab2(self.tabWidget, tab=self.tab2, label='Еще график', ox='Время', oy='Количество пакетов'),
-            Tab3(self.tabWidget, label='И еще график', ox='Время', oy='Объем пакетов')
+            Tab1(self.tabWidget, tab=self.tab1, label='Объем пакетов/порядковый номер',
+                 ox='Номер пакета', oy='Объем пакета'),
+            Tab2(self.tabWidget, tab=self.tab2, label='Количество/время', ox='Время', oy='Количество пакетов'),
+            Tab3(self.tabWidget, label='Объем/время', ox='Время', oy='Объем пакетов')
         ]
-        self.tabs[0].assign_scroll_trigger(self.change_scroll_handler)
-        self.tabs[1].assign_scroll_trigger(self.change_scroll_handler)
+        for tab in self.tabs:
+            tab.assign_scroll_trigger(self.change_scroll_handler)
         self.current_tab = self.tabs[0]
 
         self.first_packet = 0
@@ -336,6 +172,8 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
             'open_file': Operation(name='Открыть файл', callback=self.open_pcap),
             'stop_and_save_file': Operation(name='Остановить и сохранить', callback=self.stop_sniffer_handler),
             'start_sniffing': Operation(name='Старт перехвата', callback=self.start_sniffer_handler),
+            #'force_draw': Operation(name='Отрисовать', callback=partial(self.update_graph, force_draw=True,
+            #                                                            session=self.sniffer_session))
         }
 
         for _, operation in self.operations.items():
@@ -386,6 +224,19 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
         # self.pcapModeButton.toggled.connect(self.enable_run_button)
         # self.executeBtn.clicked.connect(self.handler_execute_from_listbox)
 
+    def add_record(self, record):
+        # import pdb; pdb.set_trace()
+        line = ''
+        if record.action:
+            line += '[{action}] '.format(action=record.action)
+        if record.message:
+            line += record.message
+        if record.packet:
+            packet = record.packet
+            line += 'Адрес/порт отправления: %s/%s; Адрес/порт назначения: %s/%s' % (
+                packet.src_addr, packet.src_port, packet.dst_addr, packet.dst_port)
+        self.eventsList.addItem(line)
+
     def tab_changed(self, idx):
         self.current_tab = self.tabs[idx]
         print('Selected', self.current_tab.label)
@@ -419,7 +270,10 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
             tab.tab_slider.setMaximum(session.packets_count)
             # tab.tab_slider.setValue(self.current_tab.tab_slider.value())
 
-    def update_graph(self, session):
+    def update_graph(self, session, force_draw=False):
+        if session is None:
+            print('session var is None!')
+            return
         self.packetsCountLabelEdit.setText(str(session.packets_count))
         # self.update_all_sliders(session)
         self.current_tab.update_slider(session, self.current_tab.RANGE_CONST)
@@ -430,7 +284,8 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
                 'first_packet: %s, last_packet %s, packet_count: %s' % (
                     self.first_packet, self.last_packet, self.packets_count))
 
-        if self.current_tab.is_changes_required():
+        if self.current_tab.is_changes_required() or force_draw:
+            # import pdb; pdb.set_trace()
             # self.current_tab.canvas.figure.clf(keep_observers=True)
             self.current_tab.plt.cla()
             # print(dir(self.figure))
@@ -441,15 +296,20 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
     def get_filename(self):
         return self.fileEdit.text()
 
+    @staticmethod
+    def process_packet(packet, suite, session):
+        session.add_packet(packet)
+
+        suite.add_record(Record('Packet', action='INFO', packet=packet))
+
+        suite.update_graph(session)
+
     def open_pcap(self):
         filename = self.get_filename()
         self.clear_session()
 
-        def callback(packet, session):
-            session.add_packet(packet)
-
         self.sniffer_session = SnifferSession(args=sys.argv, output_pcap=filename)
-        callback_fn = partial(callback, session=self.sniffer_session)
+        callback_fn = partial(self.process_packet, session=self.sniffer_session, suite=self)
         self.sniffer_session.set_callback(callback_fn)
         try:
             self.sniffer_session.open_pcap()
@@ -463,13 +323,8 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
 
         self.clear_session()
 
-        def callback(packet, session):
-            session.add_packet(packet)
-            if len(session.packets) % 5 == 0:
-                self.update_graph(session)
-
         self.sniffer_session = SnifferSession(args=sys.argv, loop=loop)
-        callback_fn = partial(callback, session=self.sniffer_session)
+        callback_fn = partial(self.process_packet, session=self.sniffer_session, suite=self)
         self.sniffer_session.set_callback(callback_fn)
         self.sniffer_session.setup_sniffer()
         self.sniffer_session.start_sniffer()

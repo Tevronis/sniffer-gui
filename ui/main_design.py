@@ -54,7 +54,7 @@ class Ui_Dialog(object):
         self.tab2.setObjectName("tab2")
         self.tabWidget.addTab(self.tab2, "")
         self.verticalLayout_5.addWidget(self.tabWidget)
-        self.eventsList = QtWidgets.QListView(Dialog)
+        self.eventsList = QtWidgets.QListWidget(Dialog)
         self.eventsList.setObjectName("eventsList")
         self.verticalLayout_5.addWidget(self.eventsList)
         self.horizontalLayout_3.addLayout(self.verticalLayout_5)

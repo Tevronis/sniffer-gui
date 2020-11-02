@@ -1,9 +1,8 @@
-import ui.viz as ui
+from ui import main_view
 
 
 def main():
-    ui.run_main()
-    # ui.run()
+    main_view.run()
 
 
 if __name__ == '__main__':
