@@ -26,7 +26,12 @@ pip3 install -r requirements.txt
 # sudo apt install libqt5gui5
 # sudo apt remove qtchooser
 sudo apt-get install libxcb-xinerama0
+echo "Enabling packets forwarding.."
+sudo ./enable_packets_forwarding.sh
+echo "Enabling done"
+echo "Please reboot system now!"
 # sudo pip3 uninstall PyQt5
+
 # sudo pip3 install PyQt5
 # sudo pip3 install PyQt5
 ######## sudo apt-get install wireshark

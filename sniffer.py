@@ -65,7 +65,7 @@ class Sniffer(SnifferBase):
 
     def open_pcap(self):
         capture = pyshark.FileCapture(self.pcap_filename)
-        # capture.set_debug()
+        capture.set_debug()
         capture.load_packets()
         packets = []
         for packet in capture:
