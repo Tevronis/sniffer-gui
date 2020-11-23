@@ -25,6 +25,9 @@ from PyQt5.QtCore import *
 import sys
 
 
+ANY = 'ANY'
+
+
 class SnifferSession:
     DELAY = 1
     sniffer = None
@@ -38,7 +41,7 @@ class SnifferSession:
         self.last_time = None
         self.ips = set()
         self.ports = set()
-        self.filters = dict()
+        self.filters = defaultdict(lambda: ANY)
 
     def set_callback(self, callback):
         self.sniffer.packet_callback = callback
@@ -86,18 +89,25 @@ class SnifferSession:
             self.start_time = t
 
         self.ips.add(packet.src_addr)
-        self.ips.add(packet.dst_addr)
+        # self.ips.add(packet.dst_addr)
         self.ports.add(packet.src_port)
-        self.ports.add(packet.dst_port)
+        # self.ports.add(packet.dst_port)
 
-        self.packets.append({
+        print('1232')
+        print(packet.src_addr)
+        print(packet.dst_addr)
+
+        item = {
             'packet': packet,
             'time': t,
             'packet_capacity': int(packet.packet.length)
-        })
+        }
+        self.packets.append(item)
+
         self.packets_count += 1
         self.last_time = t
-        self.packets_by_time[self.get_last_interval()].append(self.packets[-1])
+        self.packets_by_time[self.get_last_interval()].append(item)
+
 
     def get_capacities(self, first=None, second=None):
         first = first or 0
@@ -109,37 +119,89 @@ class SnifferSession:
         }
 
     def apply_filter(self, packet):
-        if not('src_addr' in self.filters and 'src_port' in self.filters and
-               'dst_addr' in self.filters and 'dst_port' in self.filters):
-            return False
-        if (packet['packet'].src_addr == self.filters['src_addr'] and
-                str(packet['packet'].src_port) == self.filters['src_port'] and
-                packet['packet'].dst_addr == self.filters['dst_addr'] and
-                str(packet['packet'].dst_port) == self.filters['dst_port']) or (
-                packet['packet'].src_addr == self.filters['dst_addr'] and
-                str(packet['packet'].src_port) == self.filters['dst_port'] and
-                packet['packet'].dst_addr == self.filters['src_addr'] and
-                str(packet['packet'].dst_port) == self.filters['src_port']):
+        def any_any():
+            return faddr1 == faddr2 == fport1 == fport2 == 'ANY'
+
+        def equal(var1, var2):
+            return var1 == var2 or var2 == 'ANY'
+
+        def equals(addr1, addr2, port1, port2):
+            return equal(addr1, addr2) and equal(port1, port2)
+
+        src_addr = packet['packet'].src_addr
+        dst_addr = packet['packet'].dst_addr
+        src_port = int(packet['packet'].src_port)
+        dst_port = int(packet['packet'].dst_port)
+        faddr1 = self.filters['addr1']
+        faddr2 = self.filters['addr2']
+        fport1 = self.filters['port1']
+        fport2 = self.filters['port2']
+
+        #print('123')
+        #print(src_addr)
+        #print(dst_addr)
+
+        if any_any():
             return True
+
+        if faddr1 != 'ANY':
+            if src_addr == faddr1 and equal(src_port, fport1):
+                if equals(dst_addr, faddr2, dst_port, fport2):
+                    return True
+            if dst_addr == faddr1 and equal(dst_port, fport1):
+                if equals(src_addr, faddr2, src_port, fport2):
+                    return True
+
+        if faddr2 != 'ANY':
+            if src_addr == faddr2 and equal(src_port, fport2):
+                if equals(dst_addr, faddr1, dst_port, fport1):
+                    return True
+            if dst_addr == faddr2 and equal(dst_port, fport2):
+                if equals(src_addr, faddr1, src_port, fport1):
+                    return True
+
+        if fport1 != 'ANY':
+            if src_port == fport1 and equal(src_addr, faddr1):
+                if equals(dst_port, fport2, dst_addr, faddr2):
+                    return True
+            if dst_port == fport1 and equal(dst_addr, faddr1):
+                if equals(src_port, fport2, src_addr, faddr2):
+                    return True
+
+        if fport2 != 'ANY':
+            if src_port == fport2 and equal(src_addr, faddr2):
+                if equals(dst_port, fport1, dst_addr, faddr1):
+                    return True
+            if dst_port == fport2 and equal(dst_addr, faddr2):
+                if equals(src_port, fport1, src_addr, faddr1):
+                    return True
+
         return False
 
     def get_packets_by_descret_times(self, start, end, callback=lambda x: x, enable_filtration=False):
         result = defaultdict(list)
-        for t, packets in self.packets_by_time.items():
+        for t in range(self.get_last_interval()):
+            if t in self.packets_by_time:
+                packets = self.packets_by_time[t]
+            else:
+                print(t)
+                print(self.packets_by_time.keys())
+                packets = []
             if t < start:
                 continue
             if end < t:
                 break
 
             if not enable_filtration:
-                result[t].append(callback(packets))
+                result[t] = callback(packets)
                 continue
 
             filtered_packets = []
             for pkt in packets:
+                print()
                 if self.apply_filter(pkt):
                     filtered_packets.append(pkt)
-            result[t].append(callback(filtered_packets))
+            result[t] = callback(filtered_packets)
 
         return result
 
@@ -191,19 +253,11 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
         self.tabs = [
             CapacityToNumberTab(tab_widget=self.tabWidget, tab=self.tab1),
             PacketsCountToTimeTab(tab_widget=self.tabWidget, tab=self.tab2),
-            CapacityToTimeTab(tab_widget=self.tabWidget),
+            # CapacityToTimeTab(tab_widget=self.tabWidget),
             PacketsCapacityToTimeSpecificPeersTab(tab_widget=self.tabWidget)
         ]
-        # ****************
-        t = self.tabs[3]
-        t.ip_apply.clicked.connect(self.add_ip_filter)
-        t.port_apply.clicked.connect(self.add_port_filter)
-        # t.ip_dropdown1.dropEvent
-        # t.ip_dropdown1.dropEvent.connect(t.update_dropdown(self.sniffer_session))
-        # t.ip_dropdown2.dropEvent.connect(t.update_dropdown(self.sniffer_session))
-        # t.port_dropdown1.dropEvent.connect(t.update_dropdown(self.sniffer_session))
-        # t.port_dropdown2.dropEvent.connect(t.update_dropdown(self.sniffer_session))
-        # ****************
+        self.ip_apply.clicked.connect(self.add_ip_filter)
+        self.port_apply.clicked.connect(self.add_port_filter)
         for tab in self.tabs:
             tab.assign_scroll_trigger(self.change_scroll_handler)
         self.current_tab = self.tabs[0]
@@ -268,17 +322,19 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
         # self.executeBtn.clicked.connect(self.handler_execute_from_listbox)
 
     def add_ip_filter(self):
-        self.sniffer_session.filters['src_addr'] = self.current_tab.ip_dropdown1.currentText()
-        self.sniffer_session.filters['dst_addr'] = self.current_tab.ip_dropdown2.currentText()
-        self.set_status('Добавлен IP фильтр: %s & %s' % (self.sniffer_session.filters['src_addr'],
-                                                         self.sniffer_session.filters['dst_addr']))
+        self.sniffer_session.filters['addr1'] = self.ip_dropdown1.currentText()
+        self.sniffer_session.filters['addr2'] = self.ip_dropdown2.currentText()
+        self.set_status('Добавлен IP фильтр: %s & %s' % (self.sniffer_session.filters['addr1'],
+                                                         self.sniffer_session.filters['addr2']))
+        self.force_draw = True
         self.update_graph(self.sniffer_session)
 
     def add_port_filter(self):
-        self.sniffer_session.filters['src_port'] = self.current_tab.port_dropdown1.currentText()
-        self.sniffer_session.filters['dst_port'] = self.current_tab.port_dropdown2.currentText()
-        self.set_status('Добавлен PORT фильтр: %s & %s' % (self.sniffer_session.filters['src_port'],
-                                                           self.sniffer_session.filters['dst_port']))
+        self.sniffer_session.filters['port1'] = self.port_dropdown1.currentText()
+        self.sniffer_session.filters['port2'] = self.port_dropdown2.currentText()
+        self.set_status('Добавлен PORT фильтр: %s & %s' % (self.sniffer_session.filters['port1'],
+                                                           self.sniffer_session.filters['port2']))
+        self.force_draw = True
         self.update_graph(self.sniffer_session)
 
     def add_record(self, record):
@@ -318,7 +374,13 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
 
     def drop_filters(self):
         if self.sniffer_session:
-            self.sniffer_session.filters = dict()
+            self.sniffer_session.filters = defaultdict(lambda: ANY)
+
+    def clear_dropdown(self):
+        self.ip_dropdown1.clear()
+        self.ip_dropdown2.clear()
+        self.port_dropdown1.clear()
+        self.port_dropdown2.clear()
 
     def clear_session(self):
         self.current_tab.plt.cla()
@@ -327,6 +389,9 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
         self.current_tab.canvas.draw_idle()
         self.eventsList.clear()
         self.drop_filters()
+        self.clear_dropdown()
+        for tab in self.tabs:
+            tab.on_clear()
 
     def update_all_sliders(self, session):
         for tab in self.tabs:
@@ -335,10 +400,11 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
 
     def update_graph(self, session):
         if session is None:
-            print('session var is None!')
+            print('session variable is None!')
             return
         self.packetsCountLabelEdit.setText(str(session.packets_count))
         self.current_tab.update_slider(session, self.current_tab.RANGE_CONST)
+        self.update_dropdown(session)
 
         assert (self.first_packet <= self.last_packet <= self.packets_count,
                 'first_packet: %s, last_packet %s, packet_count: %s' % (
@@ -351,6 +417,31 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
             self.current_tab.draw(session)
             self.current_tab.canvas.draw_idle()
 
+    def update_dropdown(self, session):
+        if session is None:
+            print('session variable is None!')
+            return
+        ip1 = self.ip_dropdown1.currentText()
+        ip2 = self.ip_dropdown2.currentText()
+        port1 = self.port_dropdown1.currentText()
+        port2 = self.port_dropdown2.currentText()
+        self.clear_dropdown()
+        self.ip_dropdown1.addItem('ANY')
+        self.ip_dropdown2.addItem('ANY')
+        self.port_dropdown1.addItem('ANY')
+        self.port_dropdown2.addItem('ANY')
+        for item in sorted(session.get_ips()):
+            self.ip_dropdown1.addItem(item)
+            self.ip_dropdown2.addItem(item)
+
+        for item in sorted(session.get_ports()):
+            self.port_dropdown1.addItem(str(item))
+            self.port_dropdown2.addItem(str(item))
+        self.ip_dropdown1.setCurrentText(ip1)
+        self.ip_dropdown2.setCurrentText(ip2)
+        self.port_dropdown1.setCurrentText(port1)
+        self.port_dropdown2.setCurrentText(port2)
+
     def get_filename(self):
         return self.fileEdit.text()
 
@@ -358,7 +449,7 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
     def process_packet(packet, suite, session):
         session.add_packet(packet)
 
-        suite.add_record(Record('Packet', action='INFO', packet=packet))
+        suite.add_record(Record('Packet', action='INFO', packet=packet, message=''))
 
         suite.update_graph(session)
 

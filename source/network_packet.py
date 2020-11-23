@@ -51,10 +51,11 @@ class NetworkPacket:
             if protocol == 'TCP':
                 self.hdr_len = pkt.tcp.hdr_len
             if protocol == 'UDP':
-                self.hdr_len = pkt.upd.length
+                self.hdr_len = pkt.udp.length
             # print('%s  %s:%s --> %s:%s' % (protocol, src_addr, src_port, dst_addr, dst_port))
         except AttributeError as e:
             # ignore packets that aren't TCP/UDP or IPv4
+            print(pkt.layers)
             raise IncorrectPacket()
 
         # if len(self.eth_header) == 0:
