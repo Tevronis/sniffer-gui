@@ -49,6 +49,39 @@ class Tab:
     def assign_scroll_trigger(self, callback):
         self.tab_slider.actionTriggered.connect(callback)
 
+    def split_y(self, session, data, filter_callback):
+        y1 = []
+        y2 = []
+        addr1 = session.filters['addr1']
+        addr2 = session.filters['addr2']
+        port1 = session.filters['port1']
+        port2 = session.filters['port2']
+        for _, pkts in sorted(data.items(), key=lambda x: x[0]):
+            value1 = 0
+            value2 = 0
+            for pkt in pkts:
+                src_addr = pkt['packet'].src_addr
+                src_port = str(pkt['packet'].src_port)
+                if addr1 in (src_addr, 'ANY') and port1 in (src_port, 'ANY'):
+                    value1 += filter_callback(pkt)
+                if addr2 in (src_addr, 'ANY') and port2 in (src_port, 'ANY'):
+                    value2 += filter_callback(pkt)
+            y1.append(value1)
+            y2.append(value2)
+        return y1, y2
+
+    @staticmethod
+    def make_label(ip, port):
+        label = ''
+        if ip and ip != 'ANY':
+            label += ip
+            if port and port != 'ANY':
+                label += ':' + str(port)
+            return label
+        if port != 'ANY':
+            label += 'port ' + str(port)
+        return label
+
     def update_slider(self, session, const):
         raise NotImplementedError()
 
@@ -70,11 +103,17 @@ class CapacityToNumberTab(Tab):
         super().__init__(label=label, ox=ox, oy=oy, *args, **kwargs)
 
     def draw(self, session):
-        data = session.get_capacities(self.start, self.end)
-        x, y = zip(*data.items())
-        self.plt.plot(x, y)
+        data = session.get_packets_by_number(self.start, self.end, enable_filtration=True)
+
+        x = data.keys()
+        y1, y2 = self.split_y(session, data, lambda pkt: pkt['packet_capacity'])
+
+        self.plt.plot(x, y1, label=self.make_label(session.filters.get('addr1'), session.filters.get('port1')))
+        self.plt.plot(x, y2, label=self.make_label(session.filters.get('addr2'), session.filters.get('port2')))
+        self.plt.set_ylim(top=max(y1 + [0]) + max(y2 + [0]))
         self.plt.set_ylabel(self.oy)
         self.plt.set_xlabel(self.ox)
+        self.plt.legend()
 
     def update_slider(self, session, const):
         self.tab_slider.setMinimum(0)
@@ -86,40 +125,6 @@ class PacketsCountToTimeTab(Tab):
 
     def __init__(self, label='Количество/время', ox='Время (сек)', oy='Количество пакетов', *args, **kwargs):
         super().__init__(label=label, ox=ox, oy=oy, *args, **kwargs)
-
-    @staticmethod
-    def make_label(ip, port):
-        label = ''
-        if ip and ip != 'ANY':
-            label += ip
-            if port and port != 'ANY':
-                label += ':' + str(port)
-            return label
-        if port != 'ANY':
-            label += 'port ' + str(port)
-        return label
-
-    def split_y(self, session, data, filter_callback):
-        y1 = []
-        y2 = []
-        addr1 = session.filters['addr1']
-        addr2 = session.filters['addr2']
-        port1 = session.filters['port1']
-        port2 = session.filters['port2']
-        for _, pkts in sorted(data.items(), key=lambda x: x[0]):
-            value1 = 0
-            value2 = 0
-            for pkt in pkts:
-                print(pkt)
-                src_addr = pkt['packet'].src_addr
-                src_port = str(pkt['packet'].src_port)
-                if addr1 in (src_addr, 'ANY') and port1 in (src_port, 'ANY'):
-                    value1 += filter_callback(pkt)
-                if addr2 in (src_addr, 'ANY') and port2 in (src_port, 'ANY'):
-                    value2 += filter_callback(pkt)
-            y1.append(value1)
-            y2.append(value2)
-        return y1, y2
 
     def draw(self, session):
         data = session.get_packets_by_descret_times(self.start, self.end, enable_filtration=True)

@@ -1,16 +1,12 @@
-# coding=utf-8
 import collections
-import datetime
 import logging
-from time import time
 
 from source.network_packet import NetworkPacket, IncorrectPacket
 from source.rdp_apps import RDP, Radmin, Teamviewer
-from source.report import Report
 
 LOGGER = logging.getLogger(__name__)
 
-STREAM_DELAY = 10
+STREAM_SIZE = 10
 
 
 class SnifferBase:
@@ -18,7 +14,7 @@ class SnifferBase:
         self.context = None
         self.udp_streams = collections.defaultdict(list)
         self.tcp_streams = collections.defaultdict(list)
-        self.analyze_previous_time = time()
+        self.packets_count = 0
 
     @property
     def outfile(self):
@@ -56,9 +52,9 @@ class SnifferBase:
         if pkt.transport_protocol in ('TCP', 'UDP'):
             src = '{}:{}'.format(pkt.src_addr, pkt.src_port)
             dst = '{}:{}'.format(pkt.dst_addr, pkt.dst_port)
-            if pkt.protocol_name == 'TCP':
+            if pkt.transport_protocol == 'TCP':
                 self.tcp_streams[tuple(sorted([src, dst]))].append(pkt)
-            if pkt.protocol_name == 'UDP':
+            if pkt.transport_protocol == 'UDP':
                 self.udp_streams[tuple(sorted([src, dst]))].append(pkt)
 
     def print_port_analyze(self, port, packets, ip):
@@ -67,12 +63,9 @@ class SnifferBase:
 
         RDP().serial_validation(port, packets, ip, suite=self)
 
-    def analyze_mode(self, packet):
-        self.analyze_stream()
-
     def analyze_stream(self):
         def discretion(value, d):
-            return (int(value) + d) / d * d
+            return (int(value) + d) // d * d
 
         def parse_stream(stream, label):
             def get_statistic(stream):
@@ -88,8 +81,8 @@ class SnifferBase:
                 }
                 host1 = stream[0].src_addr
                 host2 = stream[0].dst_addr
-                result['src_port'] = stream[0].src_port
-                result['dst_port'] = stream[0].dst_port
+                result['src_port'] = int(stream[0].src_port)
+                result['dst_port'] = int(stream[0].dst_port)
                 packet_length_stat = {
                     host1: collections.defaultdict(int),
                     host2: collections.defaultdict(int)
@@ -99,16 +92,23 @@ class SnifferBase:
                 for idx in range(1, len(stream)):
                     packet = stream[idx]
                     previous_packet = stream[idx - 1]
-                    if 'SMB' in packet.data:
+                    # dirty:
+                    data = ''
+                    try:
+                        data = ''.join(map(lambda x: chr(int(x, 16)), str(packet.transport.payload).split(':'))).lower()
+                    except AttributeError:
+                        pass
+
+                    if 'SMB' in data:
                         smb_counter += 1
 
                     delay_between_packets[discretion(packet.time - previous_packet.time, 1)] += 1
-                    packet_length_stat[packet.src_addr][discretion(packet.data_len, 60)] += 1
+                    packet_length_stat[packet.src_addr][discretion(len(data), 1)] += 1
 
                 result['delay_between_packets'] = delay_between_packets
                 if smb_counter != 0:
                     result['smb'] = True
-                    # return result
+                    return result
 
                 val1 = 0
                 val2 = 0
@@ -124,40 +124,35 @@ class SnifferBase:
                 result['average_packet_lengths'] = (val1, val2)
                 return result
 
-            report = Report()
-            for tuple_hosts, stream in stream.iteritems():
+            result = []
+            for tuple_hosts, stream in stream.items():
                 # get data from stream
                 s = get_statistic(stream)
-                report.append('----------')
-                report.append('Время: {}; Протокол: {}; \nХосты: {}'.format(datetime.datetime.now(), label, tuple_hosts))
-                report.append('Инициатор подключения: {}'.format(s['client']))
-                report.append('Управляемая машина: {}'.format(s['server']))
 
                 # here we analyze stream data that is contain in statistic
                 if s['smb']:
-                    report.append('Результат:')
-                    report.append('\tобнаружен SMB пакет!')
+                    result.append('Обнаружен SMB пакет! Хосты: {}'.format(tuple_hosts))
                 elif max(s['average_packet_lengths']) > 300:
-                    report.append('Результат:')
                     for remote_app in (RDP, Radmin, Teamviewer):
                         app = remote_app()
-                        result = app.analyze_stream_stat(s)
-                        if result:
-                            report.append(result)
-                            # break
-                else:
-                    break
+                        res = app.analyze_stream_stat(s)
+                        if res:
+                            result.append(
+                                'Протокол: {}; Хосты: {}'.format(label, tuple_hosts))
+                            result.append(res)
+                            break
 
-                report.print_report()
+            return result
 
-        if time() - self.analyze_previous_time > STREAM_DELAY:
-            parse_stream(self.tcp_streams, 'TCP')
-            parse_stream(self.udp_streams, 'UDP')
+        result = []
+        if self.packets_count % STREAM_SIZE == 0:
+            result += parse_stream(self.tcp_streams, 'TCP')
+            result += parse_stream(self.udp_streams, 'UDP')
 
             # drop containers
             self.udp_streams = collections.defaultdict(list)
             self.tcp_streams = collections.defaultdict(list)
-            self.analyze_previous_time = time()
+        return result
 
     def parse_packet(self, packet):
         try:

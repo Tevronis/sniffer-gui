@@ -1,4 +1,3 @@
-# coding=utf-8
 import logging
 
 LOGGER = logging.getLogger(__name__)
@@ -6,9 +5,6 @@ LOGGER = logging.getLogger(__name__)
 
 class RemoteApp:
     name = None
-
-    def __init__(self):
-        pass
 
     def print_detection_port_sequence(self, ip, count, port):
         msg = '\nС адреса {} замечена {} сессия. ' \

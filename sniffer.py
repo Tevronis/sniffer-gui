@@ -1,5 +1,3 @@
-# coding=utf-8
-import asyncio
 import os
 
 import pyshark
@@ -9,7 +7,7 @@ import psutil
 from sniffer_base import SnifferBase
 from source.context import Context
 from source.network_packet import NetworkPacket, IncorrectPacket
-from source.utils import *
+from source.utils import with_async_state
 
 
 class Sniffer(SnifferBase):
@@ -54,6 +52,7 @@ class Sniffer(SnifferBase):
     def run(self):
         print('Sniffer started working')
         cap = pyshark.LiveCapture(interface=self.dev, eventloop=self.loop, output_file='temp.pcap')# , include_raw=True)
+        cap.set_debug()
         for pkt in cap.sniff_continuously():
             if not self.running:
                 break
@@ -66,7 +65,8 @@ class Sniffer(SnifferBase):
     def open_pcap(self):
         capture = pyshark.FileCapture(self.pcap_filename)
         capture.set_debug()
-        capture.load_packets()
+
+        with_async_state(capture.load_packets, cnt=5)
         packets = []
         for packet in capture:
             packets.append(packet)
@@ -77,24 +77,12 @@ class Sniffer(SnifferBase):
         try:
             packet = NetworkPacket(captured_data)
         except IncorrectPacket:
-            print('Unsupported packet type TODO')
             return
+
+        self.packets_count += 1
 
         if self.packet_callback:
             self.packet_callback(packet)
-
-        # Save all packets
-        if self.context.RAW_MODE:
-            self.raw_mode(packet)
-
-        # Save packet with remote protocol markers
-        # if self.context.REMOTE_CAPTURE_MODE:
-        #    self.filter_mode(packet)
-
-        # Analyze packets stream
-        #if self.context.ANALYZE_MODE:
-        ##    self.update_stream(packet)
-        #    self.analyze_mode(packet)
 
 
 if __name__ == "__main__":

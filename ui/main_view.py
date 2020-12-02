@@ -1,25 +1,16 @@
 import asyncio
-import logging
-import random
-import signal
 from collections import defaultdict
 from functools import partial
-from time import sleep, time
 from datetime import datetime, timedelta
 
-import matplotlib.pyplot as plt
-from PyQt5 import QtWidgets, QtCore
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
+from PyQt5 import QtWidgets
 
 from sniffer import Sniffer
 from source.multithreading_helpers import Worker
 from source.widgets.record import Record
-from source.widgets.tab import CapacityToNumberTab, PacketsCountToTimeTab, CapacityToTimeTab, PacketsCapacityToTimeSpecificPeersTab
+from source.widgets.tab import CapacityToNumberTab, PacketsCountToTimeTab, PacketsCapacityToTimeSpecificPeersTab
 from ui import main_design
 
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 
 import sys
@@ -61,19 +52,16 @@ class SnifferSession:
     def set_pcap_filename(self, filename):
         self.sniffer.pcap_filename = filename
 
+    def get_stream_stat(self):
+        return self.sniffer.analyze_stream()
+
     @staticmethod
     def _round_time(dt, round_to=60):
-        """Round a datetime object to any time lapse in seconds
-        dt : datetime.datetime object, default now.
-        roundTo : Closest number of seconds to round to, default 1 minute.
-        """
         seconds = (dt.replace(tzinfo=None) - dt.min).seconds
         rounding = (seconds + round_to / 2) // round_to * round_to
         return dt + timedelta(0, rounding - seconds, -dt.microsecond)
 
     def get_interval_position(self, start, end):
-        # import pdb; pdb.set_trace()
-        # print('get_interval_position', ((end - start) / self.DELAY).seconds)
         return ((end - start) / self.DELAY).seconds
 
     def get_last_interval(self):
@@ -89,13 +77,9 @@ class SnifferSession:
             self.start_time = t
 
         self.ips.add(packet.src_addr)
-        # self.ips.add(packet.dst_addr)
         self.ports.add(packet.src_port)
-        # self.ports.add(packet.dst_port)
 
-        print('1232')
-        print(packet.src_addr)
-        print(packet.dst_addr)
+        self.sniffer.update_stream(packet)
 
         item = {
             'packet': packet,
@@ -108,14 +92,13 @@ class SnifferSession:
         self.last_time = t
         self.packets_by_time[self.get_last_interval()].append(item)
 
-
-    def get_capacities(self, first=None, second=None):
+    def get_packets_by_number(self, first=None, second=None, enable_filtration=False):
         first = first or 0
         second = second or self.packets_count
         return {
-            idx: int(packet['packet_capacity'])
+            idx: [packet]
             for idx, packet in enumerate(self.packets)
-            if first <= idx <= second
+            if first <= idx <= second and (not enable_filtration or self.apply_filter(packet))
         }
 
     def apply_filter(self, packet):
@@ -136,10 +119,6 @@ class SnifferSession:
         faddr2 = self.filters['addr2']
         fport1 = self.filters['port1']
         fport2 = self.filters['port2']
-
-        #print('123')
-        #print(src_addr)
-        #print(dst_addr)
 
         if any_any():
             return True
@@ -184,8 +163,6 @@ class SnifferSession:
             if t in self.packets_by_time:
                 packets = self.packets_by_time[t]
             else:
-                print(t)
-                print(self.packets_by_time.keys())
                 packets = []
             if t < start:
                 continue
@@ -198,7 +175,6 @@ class SnifferSession:
 
             filtered_packets = []
             for pkt in packets:
-                print()
                 if self.apply_filter(pkt):
                     filtered_packets.append(pkt)
             result[t] = callback(filtered_packets)
@@ -238,7 +214,7 @@ def get_operation_by_name(operations, name):
     return None
 
 
-class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
+class SnifferGUI(QtWidgets.QDialog, main_design.Ui_Dialog):
     LOGDIR = 'logs'
 
     def __init__(self):
@@ -249,7 +225,7 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
         self.force_draw = False
 
         # tabs
-        self.tabWidget.currentChanged.connect(self.tab_changed)
+        self.tabWidget.currentChanged.connect(self.tab_changed_handler)
         self.tabs = [
             CapacityToNumberTab(tab_widget=self.tabWidget, tab=self.tab1),
             PacketsCountToTimeTab(tab_widget=self.tabWidget, tab=self.tab2),
@@ -277,49 +253,11 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
             operation.add_to_list(self.listWidget)
 
         print(self.listWidget.selectedItems())
-        self.executeBtn.clicked.connect(self.handler_execute_from_listbox)
-        self.listWidget.itemDoubleClicked.connect(self.handler_double_clicked_list)
-
-        # self.sl.setMinimum(10)
-        #       self.sl.setMaximum(30)
-        #       self.sl.setValue(20)
-        #       self.sl.setTickPosition(QSlider.TicksBelow)
-        #       self.sl.setTickInterval(5)
-        #
-        #       layout.addWidget(self.sl)
-        #       self.sl.valueChanged.connect(self.valuechange)
-        #       self.setLayout(layout)
-        #       self.setWindowTitle("SpinBox demo")
-        #
-        #    def valuechange(self):
-        #       size = self.sl.value()
-        #       self.l1.setFont(QFont("Arial",size))
-
-        # Buttons assign
-        # self.startButton.clicked.connect(self.start_sniffer_handler)
-        # self.stopButton.clicked.connect(self.stop_sniffer_handler)
-        # self.executeBtn.clicked.connect(self.run_sniffer_handler)
+        self.executeBtn.clicked.connect(self.execute_from_listbox_handler)
+        self.listWidget.itemDoubleClicked.connect(self.double_clicked_list_handler)
 
         self.threadpool = QThreadPool()
         print("Multithreading with maximum %d threads" % self.threadpool.maxThreadCount())
-        # self.gridLayout.addWidget(self.canvas, 0, 1, 9, 9)
-
-        # print(self.listWidget.selectedItems())
-        # self.executeBtn.clicked.connect(self.handler_execute_from_listbox)
-        # self.listWidget.itemDoubleClicked.connect(self.handler_double_clicked_list)
-
-        # self.onlyWarningsButton.setEnabled(False) # nado napisat
-        # self.suspiciousTraficButton.setEnabled(False)
-        # self.pcapModeButton.setEnabled(False)
-        #
-        # self.interfacesList.addItems(psutil.net_if_addrs().keys())
-        #
-        # self.runButton.setEnabled(False)
-        # self.runButton.clicked.connect(self.run_sniffer)
-        # self.showLogsButton.clicked.connect(self.open_log_directory)
-        # self.liveCaptureButton.toggled.connect(self.enable_run_button)
-        # self.pcapModeButton.toggled.connect(self.enable_run_button)
-        # self.executeBtn.clicked.connect(self.handler_execute_from_listbox)
 
     def add_ip_filter(self):
         self.sniffer_session.filters['addr1'] = self.ip_dropdown1.currentText()
@@ -343,13 +281,14 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
             line += '[{action}] '.format(action=record.action)
         if record.message:
             line += record.message
-        if record.packet:
+        if record.packet and False:
             packet = record.packet
             line += 'Адрес/порт отправления: %s/%s; Адрес/порт назначения: %s/%s' % (
                 packet.src_addr, packet.src_port, packet.dst_addr, packet.dst_port)
         self.eventsList.addItem(line)
 
-    def tab_changed(self, idx):
+    # HANDLERS
+    def tab_changed_handler(self, idx):
         self.current_tab = self.tabs[idx]
         self.current_tab.on_select(session=self.sniffer_session)
         self.force_draw = True
@@ -358,9 +297,9 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
 
     def change_scroll_handler(self):
         self.update_graph(self.sniffer_session)
-        print(self.current_tab.tab_slider.sliderPosition())
+        # print(self.current_tab.tab_slider.sliderPosition())
 
-    def handler_execute_from_listbox(self):
+    def execute_from_listbox_handler(self):
         operations = []
         for item in self.listWidget.selectedItems():
             operations.append(item.text())
@@ -368,31 +307,35 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
             o = get_operation_by_name(self.operations.values(), operation_name)
             o.execute()
 
-    def handler_double_clicked_list(self, item):
+    def double_clicked_list_handler(self, item):
         o = get_operation_by_name(self.operations.values(), item.text())
         o.execute()
 
+    # CLEAN
     def drop_filters(self):
         if self.sniffer_session:
             self.sniffer_session.filters = defaultdict(lambda: ANY)
+        self.set_status('Все фильтры сброшены')
 
-    def clear_dropdown(self):
+    def clean_dropdown(self):
         self.ip_dropdown1.clear()
         self.ip_dropdown2.clear()
         self.port_dropdown1.clear()
         self.port_dropdown2.clear()
 
-    def clear_session(self):
+    def clean_session(self):
+        print('Clean session')
         self.current_tab.plt.cla()
         self.current_tab.plt.set_ylabel(self.current_tab.oy)
         self.current_tab.plt.set_xlabel(self.current_tab.ox)
         self.current_tab.canvas.draw_idle()
         self.eventsList.clear()
         self.drop_filters()
-        self.clear_dropdown()
+        self.clean_dropdown()
         for tab in self.tabs:
             tab.on_clear()
 
+    # UPDATE
     def update_all_sliders(self, session):
         for tab in self.tabs:
             tab.tab_slider.setMinimum(self.current_tab.RANGE_CONST)
@@ -414,8 +357,11 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
                 session.packets_count < self.current_tab.RANGE_CONST):
             self.force_draw = False
             self.current_tab.plt.cla()
-            self.current_tab.draw(session)
-            self.current_tab.canvas.draw_idle()
+            try:
+                self.current_tab.draw(session)
+                self.current_tab.canvas.draw_idle()
+            except Exception as e:
+                print(e)
 
     def update_dropdown(self, session):
         if session is None:
@@ -425,7 +371,7 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
         ip2 = self.ip_dropdown2.currentText()
         port1 = self.port_dropdown1.currentText()
         port2 = self.port_dropdown2.currentText()
-        self.clear_dropdown()
+        self.clean_dropdown()
         self.ip_dropdown1.addItem('ANY')
         self.ip_dropdown2.addItem('ANY')
         self.port_dropdown1.addItem('ANY')
@@ -442,6 +388,13 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
         self.port_dropdown1.setCurrentText(port1)
         self.port_dropdown2.setCurrentText(port2)
 
+    # ANALISE
+    def test(self, session):
+        data = session.get_stream_stat()
+        if data:
+            print(data)
+        return data
+
     def get_filename(self):
         return self.fileEdit.text()
 
@@ -449,13 +402,17 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
     def process_packet(packet, suite, session):
         session.add_packet(packet)
 
-        suite.add_record(Record('Packet', action='INFO', packet=packet, message=''))
+        warnings = suite.test(session)
+        for warn in warnings:
+            suite.add_record(Record('Packet', action='WARNING', packet=packet, message=warn))
+        # suite.add_record(Record('Packet', action='INFO', packet=packet, message=''))
 
         suite.update_graph(session)
 
     def open_pcap(self):
         filename = self.get_filename()
-        self.clear_session()
+        self.set_status('Открытие файла %s...' % filename)
+        self.clean_session()
 
         self.sniffer_session = SnifferSession(args=sys.argv, output_pcap=filename)
         callback_fn = partial(self.process_packet, session=self.sniffer_session, suite=self)
@@ -467,13 +424,15 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
             return
         self.force_draw = True
         self.update_graph(self.sniffer_session)
+        self.set_status('Файл %s успешно загружен' % filename)
 
     def run_sniffer(self, progress_callback, loop=None):
         assert loop
 
-        self.clear_session()
+        self.clean_session()
 
         self.sniffer_session = SnifferSession(args=sys.argv, loop=loop)
+        self.set_status('Старт новой сессии')
         callback_fn = partial(self.process_packet, session=self.sniffer_session, suite=self)
         self.sniffer_session.set_callback(callback_fn)
         self.sniffer_session.setup_sniffer()
@@ -519,7 +478,7 @@ class ExampleApp(QtWidgets.QDialog, main_design.Ui_Dialog):
 
 def run():
     app = QtWidgets.QApplication(sys.argv)
-    window = ExampleApp()
+    window = SnifferGUI()
     window.show()
     app.exec_()
 
