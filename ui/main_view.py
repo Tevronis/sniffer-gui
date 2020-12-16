@@ -95,11 +95,13 @@ class SnifferSession:
     def get_packets_by_number(self, first=None, second=None, enable_filtration=False):
         first = first or 0
         second = second or self.packets_count
-        return {
-            idx: [packet]
-            for idx, packet in enumerate(self.packets)
-            if first <= idx <= second and (not enable_filtration or self.apply_filter(packet))
-        }
+        result = {}
+        for idx, packet in enumerate(self.packets):
+            if idx > second:
+                break
+            if first <= idx and (not enable_filtration or self.apply_filter(packet)):
+                result[idx] = [packet]
+        return result
 
     def apply_filter(self, packet):
         def any_any():
@@ -113,8 +115,8 @@ class SnifferSession:
 
         src_addr = packet['packet'].src_addr
         dst_addr = packet['packet'].dst_addr
-        src_port = int(packet['packet'].src_port)
-        dst_port = int(packet['packet'].dst_port)
+        src_port = str(int(packet['packet'].src_port))
+        dst_port = str(int(packet['packet'].dst_port))
         faddr1 = self.filters['addr1']
         faddr2 = self.filters['addr2']
         fport1 = self.filters['port1']
@@ -391,8 +393,8 @@ class SnifferGUI(QtWidgets.QDialog, main_design.Ui_Dialog):
     # ANALISE
     def test(self, session):
         data = session.get_stream_stat()
-        if data:
-            print(data)
+        # if data:
+        #     print(data)
         return data
 
     def get_filename(self):

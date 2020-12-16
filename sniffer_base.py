@@ -99,7 +99,7 @@ class SnifferBase:
                     except AttributeError:
                         pass
 
-                    if 'SMB' in data:
+                    if 'smb' in data:
                         smb_counter += 1
 
                     delay_between_packets[discretion(packet.time - previous_packet.time, 1)] += 1
