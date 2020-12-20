@@ -96,10 +96,9 @@ class SnifferSession:
         first = first or 0
         second = second or self.packets_count
         result = {}
-        for idx, packet in enumerate(self.packets):
-            if idx > second:
-                break
-            if first <= idx and (not enable_filtration or self.apply_filter(packet)):
+        for idx in range(first, second+1):
+            packet = self.packets[idx]
+            if not enable_filtration or self.apply_filter(packet):
                 result[idx] = [packet]
         return result
 
@@ -373,22 +372,26 @@ class SnifferGUI(QtWidgets.QDialog, main_design.Ui_Dialog):
         ip2 = self.ip_dropdown2.currentText()
         port1 = self.port_dropdown1.currentText()
         port2 = self.port_dropdown2.currentText()
-        self.clean_dropdown()
-        self.ip_dropdown1.addItem('ANY')
-        self.ip_dropdown2.addItem('ANY')
-        self.port_dropdown1.addItem('ANY')
-        self.port_dropdown2.addItem('ANY')
-        for item in sorted(session.get_ips()):
-            self.ip_dropdown1.addItem(item)
-            self.ip_dropdown2.addItem(item)
 
-        for item in sorted(session.get_ports()):
-            self.port_dropdown1.addItem(str(item))
-            self.port_dropdown2.addItem(str(item))
-        self.ip_dropdown1.setCurrentText(ip1)
-        self.ip_dropdown2.setCurrentText(ip2)
-        self.port_dropdown1.setCurrentText(port1)
-        self.port_dropdown2.setCurrentText(port2)
+        def process_filters(drop_down, current_text, callback):
+            old_values = set()
+            for i in range(drop_down.count()):
+                value = drop_down.itemText(i)
+                if value != 'ANY':
+                    old_values.add(value)
+            values = callback()
+            if set(old_values) == values:
+                return
+            drop_down.clear()
+            drop_down.addItem('ANY')
+            for item in sorted(values):
+                drop_down.addItem(str(item))
+            drop_down.setCurrentText(current_text)
+
+        process_filters(self.ip_dropdown1, ip1, session.get_ips)
+        process_filters(self.ip_dropdown2, ip2, session.get_ips)
+        process_filters(self.port_dropdown1, port1, session.get_ports)
+        process_filters(self.port_dropdown2, port2, session.get_ports)
 
     # ANALISE
     def test(self, session):
