@@ -1,5 +1,6 @@
 import collections
 import logging
+from datetime import datetime, timedelta
 
 from source.network_packet import NetworkPacket, IncorrectPacket
 from source.rdp_apps import RDP, Radmin, Teamviewer
@@ -63,6 +64,12 @@ class SnifferBase:
 
         RDP().serial_validation(port, packets, ip, suite=self)
 
+    @staticmethod
+    def _round_time(dt, round_to=60):
+        seconds = (dt.replace(tzinfo=None) - dt.min).seconds
+        rounding = (seconds + round_to / 2) // round_to * round_to
+        return dt + timedelta(0, rounding - seconds, -dt.microsecond)
+
     def analyze_stream(self):
         def discretion(value, d):
             return (int(value) + d) // d * d
@@ -101,7 +108,10 @@ class SnifferBase:
 
                     if 'smb' in data:
                         smb_counter += 1
-
+                    # t1 = datetime.fromtimestamp(int(packet.packet.frame_info.time_epoch.split('.')[0]))
+                    # t2 = datetime.fromtimestamp(int(previous_packet.packet.frame_info.time_epoch.split('.')[0]))
+                    # t3 = self._round_time(t1, 1)
+                    # t4 = self._round_time(t2, 1)
                     delay_between_packets[discretion(packet.time - previous_packet.time, 1)] += 1
                     packet_length_stat[packet.src_addr][discretion(len(data), 1)] += 1
 

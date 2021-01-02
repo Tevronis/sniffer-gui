@@ -47,6 +47,7 @@ class Sniffer(SnifferBase):
         if not isinstance(self.dev, str):
             self.dev = list(self.dev)
 
+        self.dev = [dev for dev in self.dev if 'vbox' not in dev]
         print("Сканируемое устройство: ", self.dev)
 
     def run(self):

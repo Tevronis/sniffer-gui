@@ -31,13 +31,15 @@ class SnifferSession:
         self.start_time = None
         self.last_time = None
         self.ips = set()
-        self.ports = set()
+        self.ports_by_addr = defaultdict(set)
         self.filters = defaultdict(lambda: ANY)
+        self.online = None
 
     def set_callback(self, callback):
         self.sniffer.packet_callback = callback
 
     def start_sniffer(self):
+        self.online = True
         self.sniffer.run()
 
     def stop_sniffer(self):
@@ -47,6 +49,7 @@ class SnifferSession:
         self.sniffer.setup()
 
     def open_pcap(self):
+        self.online = False
         self.sniffer.open_pcap()
 
     def set_pcap_filename(self, filename):
@@ -77,7 +80,8 @@ class SnifferSession:
             self.start_time = t
 
         self.ips.add(packet.src_addr)
-        self.ports.add(packet.src_port)
+        self.ports_by_addr[packet.src_addr].add(packet.src_port)
+        self.ports_by_addr['ANY'].add(packet.src_port)
 
         self.sniffer.update_stream(packet)
 
@@ -96,7 +100,7 @@ class SnifferSession:
         first = first or 0
         second = second or self.packets_count
         result = {}
-        for idx in range(first, second+1):
+        for idx in range(first, min(len(self.packets), second+1)):
             packet = self.packets[idx]
             if not enable_filtration or self.apply_filter(packet):
                 result[idx] = [packet]
@@ -185,8 +189,8 @@ class SnifferSession:
     def get_ips(self):
         return self.ips
 
-    def get_ports(self):
-        return self.ports
+    def get_ports(self, addr='ANY'):
+        return self.ports_by_addr[addr]
 
     def save(self):
         pass
@@ -242,6 +246,11 @@ class SnifferGUI(QtWidgets.QDialog, main_design.Ui_Dialog):
         self.first_packet = 0
         self.last_packet = 0
         self.packets_count = 0
+
+        self.ip_dropdown1.addItem('ANY')
+        self.ip_dropdown2.addItem('ANY')
+        self.port_dropdown1.addItem('ANY')
+        self.port_dropdown2.addItem('ANY')
 
         self.operations = {
             'open_file': Operation(name='Открыть файл', callback=self.open_pcap),
@@ -368,18 +377,18 @@ class SnifferGUI(QtWidgets.QDialog, main_design.Ui_Dialog):
         if session is None:
             print('session variable is None!')
             return
-        ip1 = self.ip_dropdown1.currentText()
-        ip2 = self.ip_dropdown2.currentText()
-        port1 = self.port_dropdown1.currentText()
-        port2 = self.port_dropdown2.currentText()
+        ip1 = self.ip_dropdown1.currentText() or 'ANY'
+        ip2 = self.ip_dropdown2.currentText() or 'ANY'
+        port1 = self.port_dropdown1.currentText() or 'ANY'
+        port2 = self.port_dropdown2.currentText() or 'ANY'
 
-        def process_filters(drop_down, current_text, callback):
+        def process_filters(drop_down, current_text, callback, **kwargs):
             old_values = set()
             for i in range(drop_down.count()):
                 value = drop_down.itemText(i)
                 if value != 'ANY':
                     old_values.add(value)
-            values = callback()
+            values = callback(**kwargs)
             if set(old_values) == values:
                 return
             drop_down.clear()
@@ -390,8 +399,8 @@ class SnifferGUI(QtWidgets.QDialog, main_design.Ui_Dialog):
 
         process_filters(self.ip_dropdown1, ip1, session.get_ips)
         process_filters(self.ip_dropdown2, ip2, session.get_ips)
-        process_filters(self.port_dropdown1, port1, session.get_ports)
-        process_filters(self.port_dropdown2, port2, session.get_ports)
+        process_filters(self.port_dropdown1, port1, session.get_ports, addr=ip1)
+        process_filters(self.port_dropdown2, port2, session.get_ports, addr=ip2)
 
     # ANALISE
     def test(self, session):
@@ -410,6 +419,10 @@ class SnifferGUI(QtWidgets.QDialog, main_design.Ui_Dialog):
         warnings = suite.test(session)
         for warn in warnings:
             suite.add_record(Record('Packet', action='WARNING', packet=packet, message=warn))
+            if 'Radmin' in warn and suite.sniffer_session.online:
+                suite.sniffer_session.online = False
+                msg = 'В системе активно менее трех портов'
+                suite.add_record(Record('Packet', action='WARNING', packet=packet, message=msg))
         # suite.add_record(Record('Packet', action='INFO', packet=packet, message=''))
 
         suite.update_graph(session)
